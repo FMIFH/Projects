@@ -1,7 +1,8 @@
 import random
 from itertools import combinations_with_replacement
 import numpy as np
-import gym
+from gym import Env
+from gym.spaces import Box, Discrete, Tuple, Dict, MultiDiscrete, MultiBinary
 
 class Passenger:
     def __init__(self,n_floors):
@@ -75,25 +76,33 @@ class Elevator:
             'Doors Open' : self.doorsOpen,
             'Max Capacity' : self.capacity,
             'Current Passengers' : len(self.passengers),
-            'Destinations' : self.destinations
+            'Destinations' : self.destinations,
         }
         
-    def getElevatorStatus(self):
-        return np.append(np.array([self.position,self.doorsOpen,self.capacity,len(self.passengers)]),self.destinations)
-    
     def inElevatorDestinations(self):
         return self.destinations
 
 
-class ElevatorSystem:
+class ElevatorSystemEnv(Env):
     
-    def __init__(self, n_eleveators,n_floors):
-        self.n_elevators = n_eleveators
+    def __init__(self, n_elevators,n_floors):
+        self.n_elevators = n_elevators
         self.n_floors = n_floors
-        self.elevators = [Elevator(self.n_floors) for i in range(n_eleveators)]
+        self.elevators = [Elevator(self.n_floors) for i in range(n_elevators)]
         self.passengers = []
         self.total_time = 0
         self.total_delivered = 0
+
+        self.action_space = Discrete(self.actions().shape[0])
+        self.observation_space = Dict(
+            {
+                'Current_Floors' : MultiDiscrete([n_floors]*n_elevators),
+                'Doors_Open' : MultiBinary(n_elevators),
+                'Current_Passengers' : MultiDiscrete([4]*n_elevators),
+                'Destinations' : MultiDiscrete([n_floors+1]*4*n_elevators),
+                'Floors Waiting': MultiBinary(n_floors)
+            }
+        )
 
     def reset(self):
         self.elevators = [Elevator(self.n_floors) for i in range(self.n_elevators)]
@@ -101,7 +110,7 @@ class ElevatorSystem:
         self.total_time = 0
 
     def actions(self):
-        return np.array(list(combinations_with_replacement([-1,0,1],self.n_elevators)))
+        return np.array(list(combinations_with_replacement([-1,0,1,2],self.n_elevators)))
 
     def moveElevator(self, elevator:int, direction:int) -> None:
         self.elevators[elevator].moveElevator(direction)    
@@ -125,12 +134,20 @@ class ElevatorSystem:
         }
 
     def state(self):
-        elevators_status = np.array([e.getElevatorStatus() for e in self.elevators])
         floors_waiting = np.zeros(self.n_floors)
         floors_waiting[list(set([p.getInitialPos()-1 for p in self.passengers if not p.isInElevator()]))] = 1
-        return np.append(elevators_status,floors_waiting)
 
-    def step(self, action:list) -> int:
+        ret = {
+                'Current_Floors' : np.array([e.position for e in self.elevators]),
+                'Doors_Open' : np.array([e.doorsOpen for e in self.elevators]),
+                'Current_Passengers' : np.array([len(e.passengers) for e in self.elevators]),
+                'Destinations' : np.array([e.destinations for e in self.elevators]).flatten('F'),
+                'Floors Waiting': floors_waiting
+            }
+        return ret
+    
+
+    def step(self, action) -> int:
         if self.total_time % 5 == 0:
             self.passengers.append(Passenger(self.n_floors))
 
@@ -139,8 +156,8 @@ class ElevatorSystem:
             p.time()
 
         dropped = []
-        for elevator, p in enumerate(action):
-            if p == 0:
+        for elevator, p in enumerate(self.actions()[action]):
+            if p > 1:
                 dropped += self.moveDoors(elevator)
             else:
                 self.moveElevator(elevator,p)
@@ -152,5 +169,10 @@ class ElevatorSystem:
             self.total_delivered += 1
 
         
+        
         done = (sum([p.getTotalTime() for p in self.passengers]) > 10**6 or self.total_time > 10**6)
-        return self.state() , reward , done , self.labeledEnvironmentStatus()
+
+        info = {}
+
+        return  self.state() , reward , done , info
+
