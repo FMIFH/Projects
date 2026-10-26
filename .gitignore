@@ -11,4 +11,5 @@ C-More/webscrappednews2.csv
 BacterialCell/images/*
 CreditFraud/creditcard.csv
 HandsOnML/*/datasets
-HandsOnML/8/my_mnist.data
+HandsOnML/*/my_mnist.data
+HandsOnML/*/images/*
